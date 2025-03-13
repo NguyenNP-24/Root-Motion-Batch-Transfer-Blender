@@ -1,7 +1,9 @@
 # Root-Motion-Batch-Transfer
-A powerful and easy-to-use Blender addon for batch transferring root motion from any rig controller. Supports multiple actions, with root motion either staying static at world origin or following a selected target controller. Ideal for game-ready animations and an efficient workflow.
+A powerful and easy-to-use Blender addon for batch transferring root motion from any rig controller. Supports multiple actions, with root motion either staying static at world origin or following a selected target controller. Ideal for game-ready animations and an efficient workflow. 
+Compatible with Blender 4.3.2 and earlier versions.
 
 UI panel viewport:
+
 ![image](https://github.com/user-attachments/assets/3f22766d-36fb-41d2-9d00-c437cfb5b52f)
 
 illustration of root motion before and after using addon:
