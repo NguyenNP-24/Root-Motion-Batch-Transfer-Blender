@@ -15,3 +15,5 @@ UI panel viewport:
 illustration of root motion before and after using addon:
 ![BeforeTool](https://github.com/user-attachments/assets/56a7a969-a53d-44db-aed3-7c37cad0d1f8)
 ![AfterTool](https://github.com/user-attachments/assets/d2ebd382-3bab-4f4f-ae78-fd5e9eec0659)
+
+Detail add-on tutorial: https://www.youtube.com/watch?v=djH-Jw-y6ag
