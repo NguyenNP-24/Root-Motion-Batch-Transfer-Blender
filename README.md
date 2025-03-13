@@ -4,7 +4,7 @@ Compatible with Blender 4.3.2 and earlier versions.
 
 UI panel viewport:
 
-![image](https://github.com/user-attachments/assets/3f22766d-36fb-41d2-9d00-c437cfb5b52f)
+![image](https://github.com/user-attachments/assets/81794a75-6d2d-47d8-b35d-bbd23423840c)
 
 illustration of root motion before and after using addon:
 ![BeforeTool](https://github.com/user-attachments/assets/56a7a969-a53d-44db-aed3-7c37cad0d1f8)
