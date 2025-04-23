@@ -1,0 +1,22 @@
+schema_version = "1.0.0"
+
+id = "root_motion_batch_transfer"
+version = "1.0.0"
+name = "Root Motion Batch Transfer"
+tagline = "Adjust the position of the original controller follow the specified controller"
+
+type = "add-on"
+maintainer = "Nguyen Phuc Nguyen"
+
+homepage = "https://github.com/NguyenNP-24/Root-Motion-Batch-Transfer-Blender"
+source = "https://github.com/NguyenNP-24/Root-Motion-Batch-Transfer-Blender"
+tracker = "https://github.com/NguyenNP-24/Root-Motion-Batch-Transfer-Blender/issues"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+tags = ["Animation", "Game Engine","Bake"]
+
+
+
