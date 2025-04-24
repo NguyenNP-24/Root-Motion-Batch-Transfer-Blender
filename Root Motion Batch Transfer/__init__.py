@@ -5,8 +5,7 @@ bl_info = {
     "blender": (4, 3, 2),
     "location": "View3D > Sidebar > RootMotion",
     "description": (
-    "This addon allows you to adjust the root controller position based on each action "
-    "or set it in world space. Supports batch processing for multiple actions, "
+    "This addon allows you to adjust the root controller position based on each action or set it in origin world space. Supports batch processing for multiple actions, "
     "making it easier to calculate character positions in game engines."),
     "doc_url": "https://github.com/NguyenNP-24/Root-Motion-Batch-Transfer-Blender",
     "category": "RootMotion",

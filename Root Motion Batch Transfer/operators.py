@@ -95,6 +95,8 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
     bl_description = "Transfer selected axis motion from COG Controller to Root Controller, bake motion, and clean up."
     bl_options = {'REGISTER', 'UNDO'}
 
+    action_name: bpy.props.StringProperty(name="Action Name", default="")
+
     def execute(self, context):
         scene = context.scene
         rig = scene.rmt_selected_rig
@@ -103,6 +105,18 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
             self.report({'WARNING'}, "No rig selected.")
             return {'CANCELLED'}
 
+        # If running from batch then change action to active
+        if self.action_name:
+            action = bpy.data.actions.get(self.action_name)
+            if action:
+                if not rig.animation_data:
+                    rig.animation_data_create()
+                rig.animation_data.action = action
+                print(f"[TransferRootMotion] Set action to: {action.name}")
+            else:
+                self.report({'ERROR'}, f"Action '{self.action_name}' not found.")
+                return {'CANCELLED'}
+            
         controller_names = [ctrl.name for ctrl in scene.controllers]
         if not controller_names:
             self.report({'WARNING'}, "No controllers added.")
@@ -206,7 +220,6 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
 
         self.report({'INFO'}, f"Bake completed. Renamed {renamed_count} actions with '_refAction' suffix.")
 
-
     def constraint_to_reference(self, rig):
         scene = bpy.context.scene
         controller_names = [ctrl.name for ctrl in scene.controllers]
@@ -253,7 +266,7 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
         collection = bpy.data.collections.get("RootMotionRefs")
         if not collection:
             collection = bpy.data.collections.new("RootMotionRefs")
-            scene.collection.children.link(collection)
+            scene.collection.children.link(collection)  # Link vào collection "RootMotionRefs" thay vì scene
 
         # Create Empty-Root
         empty_root = bpy.data.objects.new("Empty-Root", None)
@@ -267,7 +280,7 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
         pb_root = rig.pose.bones.get(root_controller_name)
 
         if pb_root is None:
-            self.report({'ERROR'}, f"Root controller '{root_controller_name}' không tồn tại!")
+            self.report({'ERROR'}, f"Root controller '{root_controller_name}' not exist!")
             return {'CANCELLED'}
 
         pb_root.location = (0, 0, 0)
@@ -279,34 +292,43 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
 
         # Create new constraint
         constraint = pb_root.constraints.new('COPY_LOCATION')
-        constraint.use_x = True
-        constraint.use_y = True
-        constraint.use_offset = False
-        constraint.target_space = 'WORLD'
-        constraint.owner_space = 'WORLD'
-
+        
+        # Set axis usage based on scene properties or default to world origin behavior
         if keep_in_world_origin:
+            constraint.use_x = True
+            constraint.use_y = True
             constraint.use_z = False
             constraint.target = empty_root
             self.report({'INFO'}, "Keep in World Origin: XY only, Target is Empty-Root")
         else:
-            constraint.use_z = False
+            # Apply user's axis selection
+            constraint.use_x = scene.axis_x
+            constraint.use_y = scene.axis_y  
+            constraint.use_z = scene.axis_z
 
             # Get value from Enum dropdown torso
             torso_controller_name = scene.rmt_torso_controller_enum
             torso_pbone = rig.pose.bones.get(torso_controller_name)
 
             if torso_pbone is None:
-                self.report({'ERROR'}, f"Torso controller '{torso_controller_name}' không tồn tại!")
+                self.report({'ERROR'}, f"Torso controller '{torso_controller_name}' not exists!")
                 return {'CANCELLED'}
 
             constraint.target = rig
             constraint.subtarget = torso_controller_name
 
-            self.report({'INFO'}, f"Follow: XY only, Target is Torso Controller '{torso_controller_name}'")
+            enabled_axes = []
+            if scene.axis_x: enabled_axes.append("X")
+            if scene.axis_y: enabled_axes.append("Y")
+            if scene.axis_z: enabled_axes.append("Z")
+            
+            self.report({'INFO'}, f"Follow: {'+'.join(enabled_axes)} axes, Target is Torso Controller '{torso_controller_name}'")
+
+        constraint.use_offset = False
+        constraint.target_space = 'WORLD'
+        constraint.owner_space = 'WORLD'
 
         return {'FINISHED'}
-
 
     def cleanup_reference_objects(self):
         # The suffix name of the actions to be cleaned up
@@ -360,7 +382,6 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
             self.report({'INFO'}, f"Removed actions: {', '.join(removed_action_names)}")
         else:
             self.report({'INFO'}, "No extra reference actions found to remove.")
-
 
     def final_bake(self, context, rig):
         scene = context.scene
@@ -431,54 +452,47 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
             self.report({'WARNING'}, "No other controllers to bake.")
 
         return {'FINISHED'}  
-class RMT_OT_BatchTransferRootMotion(bpy.types.Operator):
-    bl_idname = "rmt.batch_transfer_root_motion"
+# class RMT_OT_BatchTransferRootMotion(bpy.types.Operator):  Old, no need anymore
+#     bl_idname = "rmt.batch_transfer_root_motion"
+#     bl_label = "Batch Transfer Root Motion"  
+#     bl_description = "Select actions to transfer root motion."
+#     bl_options = {'REGISTER', 'UNDO'}
+
+#     def execute(self, context):
+#         # Open the action selection panel, only show related rig action
+#         return context.window_manager.invoke_props_dialog(RMT_PT_SelectActionsPanel)
+class RMT_OT_BatchTransferRootMotionContinue(bpy.types.Operator):
+    bl_idname = "rmt.batch_transfer_root_motion_continue"
     bl_label = "Batch Transfer Root Motion"
-    bl_description = "Transfer Root Motion for all actions in the rig"
+    bl_description = "Apply Transfer Root Motion for all selected Actions"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         scene = context.scene
+        selected_actions = scene.rmt_batch_actions
+
+        if not selected_actions:
+            self.report({'WARNING'}, "No actions selected for batch processing.")
+            return {'CANCELLED'}
+
+        # Save current action to restore
         rig = scene.rmt_selected_rig
+        current_action = rig.animation_data.action if rig.animation_data else None
 
-        if not rig:
-            self.report({'WARNING'}, "No rig selected.")
-            return {'CANCELLED'}
+        for item in selected_actions:
+            action_name = item.name
+            print(f"\n[Batch] Processing Action: {action_name}")
+            result = bpy.ops.rmt.transfer_root_motion('INVOKE_DEFAULT', action_name=action_name)
+            if result != {'FINISHED'}:
+                self.report({'ERROR'}, f"Failed to process action: {action_name}")
 
-        original_action = rig.animation_data.action if rig.animation_data else None
-
-        actions = [act for act in bpy.data.actions if act.users > 0]
-        total = len(actions)
-
-        if total == 0:
-            self.report({'WARNING'}, "No actions found!")
-            return {'CANCELLED'}
-
-        for idx, action in enumerate(actions, 1):
-            # Assign action to rig
-            if rig.animation_data is None:
-                rig.animation_data_create()
-
-            rig.animation_data.action = action
-            self.report({'INFO'}, f"Processing ({idx}/{total}): {action.name}")
-
-            # Call the Transfer Root Motion process for each action
-            result = self.transfer_for_action(context, rig)
-
-            if result == {'CANCELLED'}:
-                self.report({'ERROR'}, f"Failed on action: {action.name}")
-                continue
-
-        # Restore the original action
-        if rig.animation_data:
-            rig.animation_data.action = original_action
+        # Returns the original action (if any)
+        if current_action:
+            rig.animation_data.action = current_action
+            print("[Batch] Restored original action.")
 
         self.report({'INFO'}, "Batch Transfer Root Motion completed.")
         return {'FINISHED'}
-
-    def transfer_for_action(self, context, rig):
-        # Copy the entire logic inside RMT_OT_TransferRootMotion.execute()
-        return bpy.ops.rmt.transfer_root_motion('INVOKE_DEFAULT')
 
 classes = [
     RMT_OT_AddController,
@@ -486,7 +500,8 @@ classes = [
     RMT_OT_RemoveController,
     RMT_OT_SelectAllControllers,
     RMT_OT_TransferRootMotion,
-    RMT_OT_BatchTransferRootMotion,
+    # RMT_OT_BatchTransferRootMotion,
+    RMT_OT_BatchTransferRootMotionContinue,
 ]
 
 def register():

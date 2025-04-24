@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 id = "root_motion_batch_transfer"
 version = "1.0.0"
 name = "Root Motion Batch Transfer"
-tagline = "Adjust the position of the original controller follow the specified controller"
+tagline = "Adjust Root controller position perfect before import Engine"
 
 type = "add-on"
 maintainer = "Nguyen Phuc Nguyen"
