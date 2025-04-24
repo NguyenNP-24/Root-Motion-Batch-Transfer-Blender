@@ -12,7 +12,7 @@ UI panel viewport:
 
 ![image](https://github.com/user-attachments/assets/81794a75-6d2d-47d8-b35d-bbd23423840c)
 
-illustration of root motion before and after using addon:
+illustration of root motion depending each method using addon:
 ![BeforeTool](https://github.com/user-attachments/assets/56a7a969-a53d-44db-aed3-7c37cad0d1f8)
 ![AfterTool](https://github.com/user-attachments/assets/d2ebd382-3bab-4f4f-ae78-fd5e9eec0659)
 
