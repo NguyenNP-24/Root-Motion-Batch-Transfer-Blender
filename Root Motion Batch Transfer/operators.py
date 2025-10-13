@@ -1,7 +1,7 @@
 import bpy
+from . import compatibility
 
 class RMT_OT_AddController(bpy.types.Operator):
-
     bl_idname = "rmt.add_controller"
     bl_label = "Add Controllers"
     bl_options = {'REGISTER', 'UNDO'}
@@ -18,19 +18,22 @@ class RMT_OT_AddController(bpy.types.Operator):
             self.report({'WARNING'}, "Please switch to Pose Mode and select bones.")
             return {'CANCELLED'}
 
-        selected_bones = context.selected_pose_bones
+        selected_bones = compatibility.get_pose_bones_selected(context)
         if not selected_bones:
             self.report({'WARNING'}, "No bones selected.")
             return {'CANCELLED'}
 
+        added = 0
         for bone in selected_bones:
             if not any(item.name == bone.name for item in scene.controllers):
                 new_ctrl = scene.controllers.add()
                 new_ctrl.name = bone.name
                 scene.controllers_index = len(scene.controllers) - 1
+                added += 1
 
-        self.report({'INFO'}, f"Added {len(selected_bones)} controllers.")
+        self.report({'INFO'}, f"Added {added} controllers.")
         return {'FINISHED'}
+
 class RMT_OT_ClearControllers(bpy.types.Operator):
     bl_idname = "rmt.clear_controllers"
     bl_label = "Clear All Controllers"
@@ -42,11 +45,11 @@ class RMT_OT_ClearControllers(bpy.types.Operator):
 
         collection = bpy.data.collections.get("RootMotionRefs")
         if collection:
-            for obj in list(collection.objects):
-                bpy.data.objects.remove(obj, do_unlink=True)
-            bpy.data.collections.remove(collection)
+            compatibility.safe_delete_collection(collection)
 
+        self.report({'INFO'}, "Cleared all controllers.")
         return {'FINISHED'}
+
 class RMT_OT_RemoveController(bpy.types.Operator):
     bl_idname = "rmt.remove_controller"
     bl_label = "Remove Controller"
@@ -56,8 +59,11 @@ class RMT_OT_RemoveController(bpy.types.Operator):
 
     def execute(self, context):
         scene = context.scene
-        scene.controllers.remove(self.index)
+        if 0 <= self.index < len(scene.controllers):
+            scene.controllers.remove(self.index)
+            self.report({'INFO'}, "Removed controller.")
         return {'FINISHED'}
+
 class RMT_OT_SelectAllControllers(bpy.types.Operator):
     bl_idname = "rmt.select_all_controllers"
     bl_label = "Select All Controllers"
@@ -79,16 +85,19 @@ class RMT_OT_SelectAllControllers(bpy.types.Operator):
         bpy.context.view_layer.objects.active = rig
 
         if rig.mode != 'POSE':
-            bpy.ops.object.mode_set(mode='POSE')
+            compatibility.safe_mode_set('POSE')
 
         bpy.ops.pose.select_all(action='DESELECT')
 
+        selected_count = 0
         for name in controller_names:
             if name in rig.pose.bones:
                 rig.pose.bones[name].bone.select = True
+                selected_count += 1
 
-        self.report({'INFO'}, "Selected all controllers.")
+        self.report({'INFO'}, f"Selected {selected_count} controllers.")
         return {'FINISHED'}
+
 class RMT_OT_TransferRootMotion(bpy.types.Operator):
     bl_idname = "rmt.transfer_root_motion"
     bl_label = "Transfer Root Motion"
@@ -109,9 +118,8 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
         if self.action_name:
             action = bpy.data.actions.get(self.action_name)
             if action:
-                if not rig.animation_data:
-                    rig.animation_data_create()
-                rig.animation_data.action = action
+                anim_data = compatibility.ensure_animation_data(rig)
+                anim_data.action = action
                 print(f"[TransferRootMotion] Set action to: {action.name}")
             else:
                 self.report({'ERROR'}, f"Action '{self.action_name}' not found.")
@@ -130,16 +138,20 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
         print(f"Using Root Controller: {root_controller}")
 
         # Call processing functions
-        #self.cleanup_reference_objects()
-        self.create_reference(rig, controller_names, scene.axis_x, scene.axis_y, scene.axis_z)
-        self.bake_reference(context)
-        self.constraint_to_reference(rig)
-        self.transfer_motion(context, rig)
-        self.final_bake(context, rig)
-        self.cleanup_reference_objects()
-
-        self.report({'INFO'}, "Transfer Root Motion completed.")
-        return {'FINISHED'}
+        try:
+            self.create_reference(rig, controller_names, scene.axis_x, scene.axis_y, scene.axis_z)
+            self.bake_reference(context)
+            self.constraint_to_reference(rig)
+            self.transfer_motion(context, rig)
+            self.final_bake(context, rig)
+            self.cleanup_reference_objects()
+            
+            self.report({'INFO'}, "Transfer Root Motion completed.")
+            return {'FINISHED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Error during transfer: {str(e)}")
+            print(f"[Error] Transfer failed: {e}")
+            return {'CANCELLED'}
 
     def create_reference(self, rig, controller_names, axis_x, axis_y, axis_z):
         scene = bpy.context.scene
@@ -150,14 +162,19 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
             bpy.context.scene.collection.children.link(collection)
 
         # Remove all previously created reference objects
-        for obj in collection.objects:
-            bpy.data.objects.remove(obj, do_unlink=True)
+        for obj in list(collection.objects):
+            compatibility.safe_delete_object(obj)
 
-        # Create reference object
+        # Create reference objects
+        created = 0
         for bone_name in controller_names:
+            if bone_name not in rig.pose.bones:
+                print(f"Warning: Bone '{bone_name}' not found in rig")
+                continue
+                
             ref_obj_name = f"{bone_name}-ref"
             if ref_obj_name in bpy.data.objects.keys():
-                self.report({'WARNING'}, f"Reference object '{ref_obj_name}' already exists! Skipping.")
+                print(f"Warning: Reference object '{ref_obj_name}' already exists! Skipping.")
                 continue
 
             empty_ref = bpy.data.objects.new(ref_obj_name, None)
@@ -165,28 +182,27 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
 
             empty_ref.parent = rig
             empty_ref.matrix_world = rig.matrix_world @ rig.pose.bones[bone_name].matrix
-            empty_ref.empty_display_size = scene.empty_size if hasattr(scene, "empty_size") else 0.2
+            empty_ref.empty_display_size = 0.2
             empty_ref.empty_display_type = 'SPHERE'
 
             constraint = empty_ref.constraints.new('COPY_TRANSFORMS')
             constraint.target = rig
             constraint.subtarget = bone_name
+            created += 1
 
-        self.report({'INFO'}, "Created reference objects.")
+        print(f"[Reference] Created {created} reference objects.")
 
     def bake_reference(self, context):
         scene = context.scene
         collection = bpy.data.collections.get("RootMotionRefs")
 
         if not collection or not collection.objects:
-            self.report({'ERROR'}, "No reference objects found!")
-            return
+            raise RuntimeError("No reference objects found!")
 
         frame_start = scene.frame_start
         frame_end = scene.frame_end
 
-        if bpy.context.object and bpy.context.object.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
+        compatibility.safe_mode_set('OBJECT')
 
         bpy.ops.object.select_all(action='DESELECT')
 
@@ -195,20 +211,21 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
 
         context.view_layer.objects.active = collection.objects[0]
 
-        bpy.ops.nla.bake(
+        # Use compatibility layer for baking
+        success = compatibility.bake_animation_safe(
+            context,
             frame_start=frame_start,
             frame_end=frame_end,
-            only_selected=True,
-            visual_keying=True,
-            clear_constraints=True,
-            clear_parents=False,
-            use_current_action=True,
-            bake_types={'OBJECT'}
+            bake_types={'OBJECT'},
+            clear_parents=False
         )
+
+        if not success:
+            raise RuntimeError("Failed to bake reference objects")
 
         bpy.ops.object.select_all(action='DESELECT')
 
-        #  Add suffix "_refAction" to the actions of reference objects
+        # Add suffix "_refAction" to the actions of reference objects
         renamed_count = 0
         for obj in collection.objects:
             if obj.animation_data and obj.animation_data.action:
@@ -218,7 +235,7 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
                     action.name = f"{action.name}_refAction"
                     renamed_count += 1
 
-        self.report({'INFO'}, f"Bake completed. Renamed {renamed_count} actions with '_refAction' suffix.")
+        print(f"[Bake] Baked and renamed {renamed_count} reference actions.")
 
     def constraint_to_reference(self, rig):
         scene = bpy.context.scene
@@ -226,37 +243,40 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
 
         collection = bpy.data.collections.get("RootMotionRefs")
         if not collection:
-            self.report({'ERROR'}, "No reference objects found!")
-            return
+            raise RuntimeError("No reference objects found!")
 
         ref_objs = {obj.name: obj for obj in collection.objects}
 
         bpy.context.view_layer.objects.active = rig
 
         if rig.mode != 'POSE':
-            bpy.ops.object.mode_set(mode='POSE')
+            compatibility.safe_mode_set('POSE')
 
+        constrained = 0
         for bone_name in controller_names:
             ref_obj_name = f"{bone_name}-ref"
             ref_obj = ref_objs.get(ref_obj_name)
 
             if not ref_obj:
-                self.report({'WARNING'}, f"Reference object '{ref_obj_name}' not found! Skipping.")
+                print(f"Warning: Reference object '{ref_obj_name}' not found! Skipping.")
                 continue
 
             pbone = rig.pose.bones.get(bone_name)
             if not pbone:
-                self.report({'WARNING'}, f"Pose bone '{bone_name}' not found! Skipping.")
+                print(f"Warning: Pose bone '{bone_name}' not found! Skipping.")
                 continue
 
-            # Clear old constraints
-            for con in pbone.constraints:
+            # Clear old RMT constraints
+            for con in list(pbone.constraints):
                 if con.name.startswith("RMT_Constraint"):
-                    pbone.constraints.remove(con)
+                    compatibility.safe_constraint_remove(pbone, con)
 
             constraint = pbone.constraints.new(type='COPY_TRANSFORMS')
             constraint.name = "RMT_Constraint_CopyTransforms"
             constraint.target = ref_obj
+            constrained += 1
+
+        print(f"[Constraint] Applied constraints to {constrained} controllers.")
 
     def transfer_motion(self, context, rig):
         scene = context.scene
@@ -266,40 +286,39 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
         collection = bpy.data.collections.get("RootMotionRefs")
         if not collection:
             collection = bpy.data.collections.new("RootMotionRefs")
-            scene.collection.children.link(collection)  # Link vào collection "RootMotionRefs" thay vì scene
+            scene.collection.children.link(collection)
 
         # Create Empty-Root
         empty_root = bpy.data.objects.new("Empty-Root", None)
-        collection.objects.link(empty_root)  # Link vào collection "RootMotionRefs" thay vì scene
+        collection.objects.link(empty_root)
 
         empty_root.location = (0, 0, 0)
-        empty_root.empty_display_size = scene.empty_size if hasattr(scene, "empty_size") else 0.2
+        empty_root.empty_display_size = 0.2
         empty_root.empty_display_type = 'SPHERE'
 
         root_controller_name = scene.rmt_root_controller_name
         pb_root = rig.pose.bones.get(root_controller_name)
 
         if pb_root is None:
-            self.report({'ERROR'}, f"Root controller '{root_controller_name}' not exist!")
-            return {'CANCELLED'}
+            raise RuntimeError(f"Root controller '{root_controller_name}' not found!")
 
         pb_root.location = (0, 0, 0)
 
         # Clear old COPY_LOCATION constraints
-        for c in pb_root.constraints:
+        for c in list(pb_root.constraints):
             if c.type == 'COPY_LOCATION':
-                pb_root.constraints.remove(c)
+                compatibility.safe_constraint_remove(pb_root, c)
 
         # Create new constraint
         constraint = pb_root.constraints.new('COPY_LOCATION')
         
-        # Set axis usage based on scene properties or default to world origin behavior
+        # Set axis usage based on scene properties
         if keep_in_world_origin:
             constraint.use_x = True
             constraint.use_y = True
             constraint.use_z = False
             constraint.target = empty_root
-            self.report({'INFO'}, "Keep in World Origin: XY only, Target is Empty-Root")
+            print("[Transfer] Mode: Keep in World Origin (XY only)")
         else:
             # Apply user's axis selection
             constraint.use_x = scene.axis_x
@@ -308,11 +327,14 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
 
             # Get value from Enum dropdown torso
             torso_controller_name = scene.rmt_torso_controller_enum
+            
+            if torso_controller_name == 'NONE' or not torso_controller_name:
+                raise RuntimeError("No torso controller selected!")
+                
             torso_pbone = rig.pose.bones.get(torso_controller_name)
 
             if torso_pbone is None:
-                self.report({'ERROR'}, f"Torso controller '{torso_controller_name}' not exists!")
-                return {'CANCELLED'}
+                raise RuntimeError(f"Torso controller '{torso_controller_name}' not found!")
 
             constraint.target = rig
             constraint.subtarget = torso_controller_name
@@ -322,16 +344,13 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
             if scene.axis_y: enabled_axes.append("Y")
             if scene.axis_z: enabled_axes.append("Z")
             
-            self.report({'INFO'}, f"Follow: {'+'.join(enabled_axes)} axes, Target is Torso Controller '{torso_controller_name}'")
+            print(f"[Transfer] Mode: Follow {'+'.join(enabled_axes)} axes from '{torso_controller_name}'")
 
         constraint.use_offset = False
         constraint.target_space = 'WORLD'
         constraint.owner_space = 'WORLD'
 
-        return {'FINISHED'}
-
     def cleanup_reference_objects(self):
-        # The suffix name of the actions to be cleaned up
         ref_action_suffix = "_refAction"
 
         # Delete "RootMotionRefs" collection and its objects
@@ -342,46 +361,48 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
             for obj in list(collection.objects):
                 if obj.animation_data and obj.animation_data.action:
                     action = obj.animation_data.action
-                    action_name = action.name  # Save name BEFORE deletion
+                    action_name = action.name
 
                     if action_name.endswith(ref_action_suffix):
-                        # Unlink action before removing it
                         obj.animation_data.action = None
-                        bpy.data.actions.remove(action, do_unlink=True)
-                        print(f"Removed action: {action_name}")
+                        try:
+                            bpy.data.actions.remove(action, do_unlink=True)
+                            print(f"Removed action: {action_name}")
+                        except Exception as e:
+                            print(f"Warning: Could not remove action {action_name}: {e}")
 
-                # Remove the object itself
-                bpy.data.objects.remove(obj, do_unlink=True)
+                compatibility.safe_delete_object(obj)
 
             # Delete the collection
-            bpy.data.collections.remove(collection)
-            self.report({'INFO'}, "Cleaned up reference objects and collection.")
+            try:
+                bpy.data.collections.remove(collection)
+                print("[Cleanup] Removed RootMotionRefs collection")
+            except Exception as e:
+                print(f"Warning: Could not remove collection: {e}")
         else:
-            self.report({'WARNING'}, "No reference collection found to clean.")
+            print("[Cleanup] No reference collection found")
 
         # Clean up any remaining actions with the suffix "_refAction"
-        removed_action_names = []  # Store names here
-
-        # First, collect actions to remove
+        removed_action_names = []
         actions_to_remove = [a for a in bpy.data.actions if a.name.endswith(ref_action_suffix)]
 
         for action in actions_to_remove:
-            action_name = action.name  # Save BEFORE deletion
+            action_name = action.name
 
             # Unlink from any object that still uses this action
             for obj in bpy.data.objects:
                 if obj.animation_data and obj.animation_data.action == action:
                     obj.animation_data.action = None
 
-            bpy.data.actions.remove(action, do_unlink=True)
-            print(f"Removed leftover action: {action_name}")
-            removed_action_names.append(action_name)  # Save name for reporting
+            try:
+                bpy.data.actions.remove(action, do_unlink=True)
+                print(f"Removed leftover action: {action_name}")
+                removed_action_names.append(action_name)
+            except Exception as e:
+                print(f"Warning: Could not remove action {action_name}: {e}")
 
-        # Report results
         if removed_action_names:
-            self.report({'INFO'}, f"Removed actions: {', '.join(removed_action_names)}")
-        else:
-            self.report({'INFO'}, "No extra reference actions found to remove.")
+            print(f"[Cleanup] Removed {len(removed_action_names)} reference actions")
 
     def final_bake(self, context, rig):
         scene = context.scene
@@ -392,11 +413,10 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
         controller_names = [ctrl.name for ctrl in scene.controllers]
 
         if not root_controller_name:
-            self.report({'ERROR'}, "No Root Controller selected for baking!")
-            return {'CANCELLED'}
+            raise RuntimeError("No Root Controller selected for baking!")
 
         if rig.mode != 'POSE':
-            bpy.ops.object.mode_set(mode='POSE')
+            compatibility.safe_mode_set('POSE')
 
         bpy.ops.pose.select_all(action='DESELECT')
 
@@ -407,19 +427,20 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
             pb_root.bone.select = True
             rig.data.bones.active = pb_root.bone
 
-            bpy.ops.nla.bake(
+            success = compatibility.bake_animation_safe(
+                context,
                 frame_start=frame_start,
                 frame_end=frame_end,
-                only_selected=True,
-                visual_keying=True,
-                clear_constraints=True,
-                clear_parents=True,
-                use_current_action=True,
-                bake_types={'POSE'}
+                bake_types={'POSE'},
+                clear_parents=True
             )
-            self.report({'INFO'}, f"Baked Root Controller: {root_controller_name}")
+            
+            if success:
+                print(f"[Bake] Baked Root Controller: {root_controller_name}")
+            else:
+                print(f"[Warning] Failed to bake Root Controller: {root_controller_name}")
         else:
-            self.report({'WARNING'}, f"Root Controller '{root_controller_name}' not found!")
+            print(f"[Warning] Root Controller '{root_controller_name}' not found!")
 
         # Bake Other Controllers
         bpy.ops.pose.select_all(action='DESELECT')
@@ -429,7 +450,7 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
         for bone_name in other_controllers:
             pbone = rig.pose.bones.get(bone_name)
             if not pbone:
-                self.report({'WARNING'}, f"Controller '{bone_name}' not found! Skipping.")
+                print(f"Warning: Controller '{bone_name}' not found! Skipping.")
                 continue
 
             pbone.bone.select = True
@@ -437,30 +458,21 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
         if other_controllers:
             rig.data.bones.active = rig.data.bones[other_controllers[0]]
 
-            bpy.ops.nla.bake(
+            success = compatibility.bake_animation_safe(
+                context,
                 frame_start=frame_start,
                 frame_end=frame_end,
-                only_selected=True,
-                visual_keying=True,
-                clear_constraints=True,
-                clear_parents=False,
-                use_current_action=True,
-                bake_types={'POSE'}
+                bake_types={'POSE'},
+                clear_parents=False
             )
-            self.report({'INFO'}, f"Baked Controllers: {other_controllers}")
+            
+            if success:
+                print(f"[Bake] Baked {len(other_controllers)} other controllers")
+            else:
+                print("[Warning] Failed to bake other controllers")
         else:
-            self.report({'WARNING'}, "No other controllers to bake.")
+            print("[Bake] No other controllers to bake")
 
-        return {'FINISHED'}  
-# class RMT_OT_BatchTransferRootMotion(bpy.types.Operator):  Old, no need anymore
-#     bl_idname = "rmt.batch_transfer_root_motion"
-#     bl_label = "Batch Transfer Root Motion"  
-#     bl_description = "Select actions to transfer root motion."
-#     bl_options = {'REGISTER', 'UNDO'}
-
-#     def execute(self, context):
-#         # Open the action selection panel, only show related rig action
-#         return context.window_manager.invoke_props_dialog(RMT_PT_SelectActionsPanel)
 class RMT_OT_BatchTransferRootMotionContinue(bpy.types.Operator):
     bl_idname = "rmt.batch_transfer_root_motion_continue"
     bl_label = "Batch Transfer Root Motion"
@@ -479,19 +491,31 @@ class RMT_OT_BatchTransferRootMotionContinue(bpy.types.Operator):
         rig = scene.rmt_selected_rig
         current_action = rig.animation_data.action if rig.animation_data else None
 
+        success_count = 0
+        fail_count = 0
+
         for item in selected_actions:
             action_name = item.name
             print(f"\n[Batch] Processing Action: {action_name}")
-            result = bpy.ops.rmt.transfer_root_motion('INVOKE_DEFAULT', action_name=action_name)
-            if result != {'FINISHED'}:
-                self.report({'ERROR'}, f"Failed to process action: {action_name}")
+            
+            try:
+                result = bpy.ops.rmt.transfer_root_motion('INVOKE_DEFAULT', action_name=action_name)
+                if result == {'FINISHED'}:
+                    success_count += 1
+                else:
+                    fail_count += 1
+                    print(f"[Batch] Failed to process action: {action_name}")
+            except Exception as e:
+                fail_count += 1
+                print(f"[Batch] Error processing action {action_name}: {e}")
 
-        # Returns the original action (if any)
+        # Restore the original action (if any)
         if current_action:
-            rig.animation_data.action = current_action
+            anim_data = compatibility.ensure_animation_data(rig)
+            anim_data.action = current_action
             print("[Batch] Restored original action.")
 
-        self.report({'INFO'}, "Batch Transfer Root Motion completed.")
+        self.report({'INFO'}, f"Batch completed: {success_count} success, {fail_count} failed")
         return {'FINISHED'}
 
 classes = [
@@ -500,7 +524,6 @@ classes = [
     RMT_OT_RemoveController,
     RMT_OT_SelectAllControllers,
     RMT_OT_TransferRootMotion,
-    # RMT_OT_BatchTransferRootMotion,
     RMT_OT_BatchTransferRootMotionContinue,
 ]
 
@@ -510,4 +533,7 @@ def register():
 
 def unregister():
     for cls in reversed(classes):
-        bpy.utils.unregister_class(cls)
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception as e:
+            print(f"Warning: Could not unregister {cls.__name__}: {e}")

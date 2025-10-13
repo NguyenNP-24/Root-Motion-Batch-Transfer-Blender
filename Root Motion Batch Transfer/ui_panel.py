@@ -1,10 +1,5 @@
 import bpy
 
-class RMT_ActionItem(bpy.types.PropertyGroup):
-    name: bpy.props.StringProperty(name="Action Name")
-    action: bpy.props.PointerProperty(type=bpy.types.Action)
-    is_selected: bpy.props.BoolProperty(name="Select", default=False)
-
 # Main Panel
 class RMT_PT_RootMotionPanel(bpy.types.Panel):
     bl_label = "Root Motion Transfer"
@@ -28,15 +23,22 @@ class RMT_PT_RootMotionPanel(bpy.types.Panel):
         row.operator("rmt.select_all_controllers", text="Select All", icon='RESTRICT_SELECT_OFF')
 
         box = layout.box()
-        for index, item in enumerate(scene.controllers):
-            row = box.row(align=True)
-            row.label(text=item.name, icon='BONE_DATA')
-            op = row.operator("rmt.remove_controller", text="", icon='X')
-            op.index = index
+        if scene.controllers:
+            for index, item in enumerate(scene.controllers):
+                row = box.row(align=True)
+                row.label(text=item.name, icon='BONE_DATA')
+                op = row.operator("rmt.remove_controller", text="", icon='X')
+                op.index = index
+        else:
+            row = box.row()
+            row.label(text="No controllers added", icon='INFO')
 
         col = layout.column(align=True)
         col.label(text="Target Controller (usually torso - COG):")
-        col.prop(scene, "rmt_torso_controller_enum", text="")
+        if scene.controllers:
+            col.prop(scene, "rmt_torso_controller_enum", text="")
+        else:
+            col.label(text="Add controllers first", icon='ERROR')
 
         col.separator()
         col.label(text="Root Controller (master):")
@@ -62,10 +64,12 @@ class RMT_PT_RootMotionPanel(bpy.types.Panel):
             subrow.prop(scene, "axis_z", text="Z")
 
         col = layout.column(align=True)
-        col.scale_y = 1
+        col.scale_y = 1.2
         col.operator("rmt.transfer_root_motion", text="Transfer Root Motion", icon='PLAY')
 
-        layout.operator("rmt.batch_transfer_root_motion", icon="ACTION")
+        col = layout.column(align=True)
+        col.scale_y = 1.2
+        col.operator("rmt.batch_transfer_root_motion", text="Batch Transfer", icon="ACTION")
 
 # Popup Panel for Batch transfer
 class RMT_OT_SelectActionsPopup(bpy.types.Operator):
@@ -83,22 +87,32 @@ class RMT_OT_SelectActionsPopup(bpy.types.Operator):
             self.report({'WARNING'}, "No rig selected.")
             return {'CANCELLED'}
 
+        actions_found = []
         for act in bpy.data.actions:
             if act.users > 0 and action_contains_rig_animation(act, rig):
                 item = scene.rmt_action_items.add()
                 item.name = act.name
                 item.action = act
                 item.is_selected = False
+                actions_found.append(act.name)
 
+        if not actions_found:
+            self.report({'WARNING'}, f"No actions found for rig '{rig.name}'")
+            return {'CANCELLED'}
+
+        print(f"[Batch] Found {len(actions_found)} actions for rig '{rig.name}'")
         return context.window_manager.invoke_props_dialog(self, width=400)
 
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        layout.label(text="Select actions to process:", icon='ACTION')
-
+        
+        box = layout.box()
+        box.label(text="Select actions to process:", icon='ACTION')
+        
+        col = box.column(align=True)
         for item in scene.rmt_action_items:
-            layout.prop(item, "is_selected", text=item.name)
+            col.prop(item, "is_selected", text=item.name)
 
     def execute(self, context):
         selected = [item.action for item in context.scene.rmt_action_items if item.is_selected]
@@ -119,34 +133,39 @@ class RMT_OT_SelectActionsPopup(bpy.types.Operator):
         # Call the batch transfer operator
         bpy.ops.rmt.batch_transfer_root_motion_continue()
     
-        self.report({'INFO'}, f"Transfered {len(selected)} actions: {', '.join([act.name for act in selected])}")     
+        self.report({'INFO'}, f"Transferred {len(selected)} actions: {', '.join([act.name for act in selected])}")     
         return {'FINISHED'}
 
-# --- Helper function, only call in RMT_PT_SelectActionsPanel ---
+# --- Helper function ---
 def action_contains_rig_animation(action, rig):
     """
-    Checks if the given action contains animation data for the specified rig's pose bones. We dont wanna bake not relate action.
+    Checks if the given action contains animation data for the specified rig's pose bones.
     Returns: True if the action contains animation for the rig, False otherwise.
     """
     if not rig or rig.type != 'ARMATURE' or not action:
         return False
 
-    # Check if action have Fcurve belong to select Rig's bone
-    for fcurve in action.fcurves:
-        if fcurve.data_path.startswith(f'pose.bones["') and fcurve.data_path.split('["')[1].split('"]')[0] in rig.data.bones:
-            return True
+    if not hasattr(action, 'fcurves') or not action.fcurves:
+        return False
+
+    # Check if action has FCurves belonging to selected Rig's bones
+    try:
+        for fcurve in action.fcurves:
+            if fcurve.data_path.startswith('pose.bones["'):
+                # Extract bone name from data_path
+                bone_name = fcurve.data_path.split('["')[1].split('"]')[0]
+                if bone_name in rig.data.bones:
+                    return True
+    except Exception as e:
+        print(f"Warning: Error checking action {action.name}: {e}")
+        return False
+    
     return False
 
 def register():
-    bpy.utils.register_class(RMT_ActionItem)
     bpy.utils.register_class(RMT_OT_SelectActionsPopup)
     bpy.utils.register_class(RMT_PT_RootMotionPanel)
-    bpy.types.Scene.rmt_batch_actions = bpy.props.CollectionProperty(type=RMT_ActionItem)
-    bpy.types.Scene.rmt_action_items = bpy.props.CollectionProperty(type=RMT_ActionItem)
 
 def unregister():
-    del bpy.types.Scene.rmt_batch_actions
-    del bpy.types.Scene.rmt_action_items
     bpy.utils.unregister_class(RMT_PT_RootMotionPanel)
     bpy.utils.unregister_class(RMT_OT_SelectActionsPopup)
-    bpy.utils.unregister_class(RMT_ActionItem)
