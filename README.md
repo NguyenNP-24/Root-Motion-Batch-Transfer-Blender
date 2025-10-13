@@ -10,7 +10,9 @@ Workflow:
 
 UI panel viewport:
 
-![image](https://github.com/user-attachments/assets/81794a75-6d2d-47d8-b35d-bbd23423840c)
+<img width="696" height="607" alt="image" src="https://github.com/user-attachments/assets/ab51b17c-cff3-4df3-81d3-95a311392b76" />
+
+
 
 illustration of root motion depending each method using addon:
 ![BeforeTool](https://github.com/user-attachments/assets/56a7a969-a53d-44db-aed3-7c37cad0d1f8)
