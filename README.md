@@ -1,6 +1,6 @@
 # Root-Motion-Batch-Transfer
 An easy-to-use Blender addon for batch transferring root motion from any rig controller. Supports multiple actions, with root motion either staying static at world origin or following a selected target controller. Ideal for game-ready animations and an efficient workflow. 
-Compatible with Blender 4.3.2 and earlier versions.
+Compatible with Blender 4.2 to 5.0
 Workflow:
 1. Select Rig (Amature)
 2. Go to pose mode and Select all controllers that will control the entire character with the same behavior as the Root controller (in most cases 2 IK leg, 2 IK hand and torso (COG)), select more if your rig has more limbs
