@@ -91,7 +91,7 @@ class RMT_OT_SelectAllControllers(bpy.types.Operator):
 
         selected_count = 0
         for name in controller_names:
-            if name in rig.pose.edit_bones:
+            if name in rig.pose.bones:
                 rig.pose.bones[name].select = True
                 selected_count += 1
 
