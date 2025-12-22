@@ -91,8 +91,8 @@ class RMT_OT_SelectAllControllers(bpy.types.Operator):
 
         selected_count = 0
         for name in controller_names:
-            if name in rig.pose.bones:
-                rig.pose.bones[name].bone.select = True
+            if name in rig.pose.edit_bones:
+                rig.pose.bones[name].select = True
                 selected_count += 1
 
         self.report({'INFO'}, f"Selected {selected_count} controllers.")
@@ -424,7 +424,7 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
         pb_root = rig.pose.bones.get(root_controller_name)
 
         if pb_root:
-            pb_root.bone.select = True
+            pb_root.select = True
             rig.data.bones.active = pb_root.bone
 
             success = compatibility.bake_animation_safe(
@@ -453,7 +453,7 @@ class RMT_OT_TransferRootMotion(bpy.types.Operator):
                 print(f"Warning: Controller '{bone_name}' not found! Skipping.")
                 continue
 
-            pbone.bone.select = True
+            pbone.select = True
 
         if other_controllers:
             rig.data.bones.active = rig.data.bones[other_controllers[0]]
